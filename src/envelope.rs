@@ -1,3 +1,6 @@
+use std::fmt;
+use vst::util::AtomicFloat;
+use std::sync::Arc;
 
 #[derive(PartialEq, Debug)]
 pub enum ADSRPhase {
@@ -7,14 +10,6 @@ pub enum ADSRPhase {
     Release,
 }
 
-
-
-impl Default for ADSREnvelope {
-    fn default() -> ADSREnvelope {
-        ADSREnvelope::new(0.5, 0.5, 0.5, 0.5)
-    }
-}
-
 #[derive(Debug)]
 pub struct ADSREnvelope {
     pub current_phase: ADSRPhase,
@@ -22,30 +17,53 @@ pub struct ADSREnvelope {
 
     note_on_volume: f64,
 
-    attack: f64,
-    decay: f64,
-    sustain: f64, // 0.0 to 1.0
-    release: f64,
+    params: ADSRParams,
 
     note_off_volume: f64,
 }
 
+pub struct ADSRParams {
+    attack: AtomicFloat,
+    decay: AtomicFloat,
+    sustain: AtomicFloat, // 0.0 to 1.0
+    release: AtomicFloat,
+}
+
+impl fmt::Debug for ADSRParams {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (a,d,s,r) = (self.attack.get(), self.decay.get(), self.sustain.get(), self.release.get());
+        write!(f, "ADSRParams({}, {}, {}, {})", a,d,s,r)
+    }
+}
+
+impl ADSRParams {
+    fn new(attack: f32, decay: f32, sustain: f32, release: f32) -> ADSRParams {
+        ADSRParams {
+            attack: AtomicFloat::new(attack),
+            decay: AtomicFloat::new(decay),
+            sustain: AtomicFloat::new(sustain), // 0.0 to 1.0
+            release: AtomicFloat::new(release),
+        }
+    }
+}
+
 impl ADSREnvelope {
-    pub fn new(attack: f64, decay: f64, sustain: f64, release: f64) -> ADSREnvelope {
+    pub fn new() -> ADSREnvelope {
+        let (attack, decay, sustain, release) = (0.0005, 0.0005, 1.0, 0.0005);
+
         ADSREnvelope {
+
             // we begin at the "end of the release phase" - nothing plays.
             current_phase: ADSRPhase::Release,
-            phase_elapsed: release,
+            phase_elapsed: release.into(),
 
             note_on_volume: 0.0,
 
-            attack: attack,
-            decay: decay,
-            sustain: sustain,
-            release: release,
+            // todo: Arc
+            params: ADSRParams::new(attack, decay, sustain, release),
 
             // this shouldn't be used before being set by note_off()
-            note_off_volume: sustain,
+            note_off_volume: sustain.into(),
         }
     }
 
@@ -71,18 +89,20 @@ impl ADSREnvelope {
 
         // TODO potential bug if dt exceeds the duration of a phase
         if self.current_phase == ADSRPhase::Attack {
-            if self.phase_elapsed > self.attack {
+            if self.phase_elapsed > self.params.attack.get().into() {
                 self.current_phase = ADSRPhase::Decay;
-                self.phase_elapsed %= self.attack;
+                let attack: f64 = self.params.attack.get().into();
+                self.phase_elapsed %= attack;
             }
         }
 
         // theoretically, could go straight from attack to sustain in one 
         // inc_time() call if dt is large
         if self.current_phase == ADSRPhase::Decay {
-            if self.phase_elapsed > self.decay {
+            if self.phase_elapsed > self.params.decay.get().into() {
                 self.current_phase = ADSRPhase::Sustain;
-                self.phase_elapsed %= self.decay;
+                let decay: f64 = self.params.decay.get().into();
+                self.phase_elapsed %= decay;
             }
         }
 
@@ -92,13 +112,21 @@ impl ADSREnvelope {
     // for now we just lerp. TODO: learn decibels and best curve shapes
     pub fn alpha(&self) -> f64 {
         match self.current_phase {
-            ADSRPhase::Attack  => lerp(self.note_on_volume, 1.0, self.phase_elapsed / self.attack),
-            ADSRPhase::Decay   => lerp_down(1.0, self.sustain, self.phase_elapsed / self.decay),
-            ADSRPhase::Sustain => self.sustain,
+            ADSRPhase::Attack  => {
+                let attack: f64 = self.params.attack.get().into();
+                lerp(self.note_on_volume, 1.0, self.phase_elapsed / attack)
+            },
+            ADSRPhase::Decay   => {
+                let decay: f64 = self.params.decay.get().into();
+                let sustain: f64 = self.params.sustain.get().into();
+                lerp_down(1.0, sustain, self.phase_elapsed / decay)
+            },
+            ADSRPhase::Sustain => self.params.sustain.get().into(),
             ADSRPhase::Release => {
+                let release: f64 = self.params.release.get().into();
                 let alpha = lerp_down(self.note_off_volume,
                                       0.0,
-                                      self.phase_elapsed / self.release);
+                                      self.phase_elapsed / release);
                 
                 // if phase_elapsed is longer than release, clamp to 0 rather than returning a
                 // negative value

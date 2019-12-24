@@ -69,6 +69,7 @@ impl MonoReplicant {
         }
     }
 
+    // TODO eliminate pops on note change
     fn note_on(&mut self, note: u8) {
         self.envelope.note_on(self.envelope.alpha());
         self.note = note;
@@ -86,7 +87,7 @@ impl Default for MonoReplicant {
         MonoReplicant {
             sample_rate: 44100.0,
             time: 0.0,
-            envelope: ADSREnvelope::default(),
+            envelope: ADSREnvelope::new(),
             note: 0, // this should never be audible before it is set to something else by note_on()
         }
     }
