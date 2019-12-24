@@ -17,7 +17,7 @@ pub struct ADSREnvelope {
 
     note_on_volume: f64,
 
-    params: ADSRParams,
+    params: Arc<ADSRParams>,
 
     note_off_volume: f64,
 }
@@ -60,7 +60,7 @@ impl ADSREnvelope {
             note_on_volume: 0.0,
 
             // todo: Arc
-            params: ADSRParams::new(attack, decay, sustain, release),
+            params: Arc::new(ADSRParams::new(attack, decay, sustain, release)),
 
             // this shouldn't be used before being set by note_off()
             note_off_volume: sustain.into(),
