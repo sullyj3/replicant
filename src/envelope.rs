@@ -16,17 +16,7 @@ pub struct ADSREnvelope {
     pub phase_elapsed: f64,
 
     note_on_volume: f64,
-
-    params: Arc<ADSRParams>,
-
     note_off_volume: f64,
-}
-
-pub struct ADSRParams {
-    attack: AtomicFloat,
-    decay: AtomicFloat,
-    sustain: AtomicFloat, // 0.0 to 1.0
-    release: AtomicFloat,
 }
 
 impl fmt::Debug for ADSRParams {
@@ -84,14 +74,14 @@ impl ADSREnvelope {
         self.phase_elapsed = 0.0;
     }
 
-    pub fn inc_timer(&mut self, dt: f64) {
+    pub fn inc_timer(&mut self, dt: f64, attack: f64, decay: f64, sustain: f64, release: f64) {
         self.phase_elapsed += dt;
 
         // TODO potential bug if dt exceeds the duration of a phase
         if self.current_phase == ADSRPhase::Attack {
-            if self.phase_elapsed > self.params.attack.get().into() {
+            if self.phase_elapsed > params.attack.get().into() {
                 self.current_phase = ADSRPhase::Decay;
-                let attack: f64 = self.params.attack.get().into();
+                let attack: f64 = params.attack.get().into();
                 self.phase_elapsed %= attack;
             }
         }
@@ -99,9 +89,9 @@ impl ADSREnvelope {
         // theoretically, could go straight from attack to sustain in one 
         // inc_time() call if dt is large
         if self.current_phase == ADSRPhase::Decay {
-            if self.phase_elapsed > self.params.decay.get().into() {
+            if self.phase_elapsed > params.decay.get().into() {
                 self.current_phase = ADSRPhase::Sustain;
-                let decay: f64 = self.params.decay.get().into();
+                let decay: f64 = params.decay.get().into();
                 self.phase_elapsed %= decay;
             }
         }
@@ -110,20 +100,20 @@ impl ADSREnvelope {
     }
 
     // for now we just lerp. TODO: learn decibels and best curve shapes
-    pub fn alpha(&self) -> f64 {
+    pub fn alpha(&self, params: &ReplicantParameters) -> f64 {
         match self.current_phase {
             ADSRPhase::Attack  => {
-                let attack: f64 = self.params.attack.get().into();
+                let attack: f64 = params.attack.get().into();
                 lerp(self.note_on_volume, 1.0, self.phase_elapsed / attack)
             },
             ADSRPhase::Decay   => {
-                let decay: f64 = self.params.decay.get().into();
-                let sustain: f64 = self.params.sustain.get().into();
+                let decay: f64 = params.decay.get().into();
+                let sustain: f64 = params.sustain.get().into();
                 lerp_down(1.0, sustain, self.phase_elapsed / decay)
             },
-            ADSRPhase::Sustain => self.params.sustain.get().into(),
+            ADSRPhase::Sustain => params.sustain.get().into(),
             ADSRPhase::Release => {
-                let release: f64 = self.params.release.get().into();
+                let release: f64 = params.release.get().into();
                 let alpha = lerp_down(self.note_off_volume,
                                       0.0,
                                       self.phase_elapsed / release);
